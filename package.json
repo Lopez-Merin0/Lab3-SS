@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "start": "node backend/server.js"
+  },
   "dependencies": {
     "clamscan": "^2.4.0",
     "cors": "^2.8.6",
