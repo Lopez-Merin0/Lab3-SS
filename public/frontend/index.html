@@ -90,27 +90,64 @@
       <div class="endpoint">
         <div class="endpoint-header">
           <span class="method post">POST</span>
-          <span class="endpoint-path">/api/scan</span>
-          <span class="endpoint-desc">Escanear un archivo</span>
+          <span class="endpoint-path">/api/upload</span>
+          <span class="endpoint-desc">Recibe archivo y lo guarda temporalmente</span>
         </div>
         <div class="code-block">
 <span class="comment">// Request (multipart/form-data)</span>
 <span class="key">Content-Type:</span> <span class="str">multipart/form-data</span>
 <span class="key">Body:</span>  <span class="str">file</span> = &lt;archivo_binario&gt;
 
-<span class="comment">// Response 200 - Limpio</span>
+<span class="comment">// Response 201</span>
 {
-  <span class="key">"status"</span>: <span class="str">"clean"</span>,
+  <span class="key">"fileId"</span>: <span class="str">"file_abc123"</span>,
   <span class="key">"filename"</span>: <span class="str">"documento.pdf"</span>,
   <span class="key">"size"</span>: <span class="num">204800</span>,
-  <span class="key">"sha256"</span>: <span class="str">"a3f5c8..."</span>,
-  <span class="key">"scannedAt"</span>: <span class="str">"2025-10-01T14:32:00Z"</span>,
-  <span class="key">"threats"</span>: []
+  <span class="key">"status"</span>: <span class="str">"uploaded"</span>
 }
+        </div>
+      </div>
 
-<span class="comment">// Response 200 - Infectado</span>
+      <div class="endpoint">
+        <div class="endpoint-header">
+          <span class="method post">POST</span>
+          <span class="endpoint-path">/api/scan/:fileId</span>
+          <span class="endpoint-desc">Escanear archivo con ClamAV</span>
+        </div>
+        <div class="code-block">
+<span class="comment">// Response 202</span>
 {
-  <span class="key">"status"</span>: <span class="str">"infected"</span>,
+  <span class="key">"scanId"</span>: <span class="str">"scan_abc123"</span>,
+  <span class="key">"fileId"</span>: <span class="str">"file_abc123"</span>,
+  <span class="key">"status"</span>: <span class="str">"pending"</span>
+}
+        </div>
+      </div>
+
+      <div class="endpoint">
+        <div class="endpoint-header">
+          <span class="method get">GET</span>
+          <span class="endpoint-path">/api/status/:scanId</span>
+          <span class="endpoint-desc">Consulta estado del escaneo</span>
+        </div>
+        <div class="code-block">
+{
+  <span class="key">"scanId"</span>: <span class="str">"scan_abc123"</span>,
+  <span class="key">"status"</span>: <span class="str">"pending"</span> | <span class="str">"scanning"</span> | <span class="str">"done"</span> | <span class="str">"error"</span>
+}
+        </div>
+      </div>
+
+      <div class="endpoint">
+        <div class="endpoint-header">
+          <span class="method get">GET</span>
+          <span class="endpoint-path">/api/result/:scanId</span>
+          <span class="endpoint-desc">Obtiene resultado final</span>
+        </div>
+        <div class="code-block">
+{
+  <span class="key">"scanId"</span>: <span class="str">"scan_abc123"</span>,
+  <span class="key">"status"</span>: <span class="str">"clean"</span> | <span class="str">"infected"</span>,
   <span class="key">"threats"</span>: [<span class="str">"Win.Trojan.Agent-1234"</span>],
   <span class="key">"action"</span>: <span class="str">"quarantined"</span>
 }
@@ -119,44 +156,12 @@
 
       <div class="endpoint">
         <div class="endpoint-header">
-          <span class="method get">GET</span>
-          <span class="endpoint-path">/api/scan/:id</span>
-          <span class="endpoint-desc">Obtener resultado de un escaneo</span>
-        </div>
-        <div class="code-block">
-<span class="comment">// Response 200</span>
-{
-  <span class="key">"id"</span>: <span class="str">"scan_abc123"</span>,
-  <span class="key">"status"</span>: <span class="str">"clean"</span> | <span class="str">"infected"</span> | <span class="str">"pending"</span>,
-  <span class="key">"result"</span>: { ... }
-}
-        </div>
-      </div>
-
-      <div class="endpoint">
-        <div class="endpoint-header">
-          <span class="method get">GET</span>
-          <span class="endpoint-path">/api/health</span>
-          <span class="endpoint-desc">Estado del servicio ClamAV</span>
-        </div>
-        <div class="code-block">
-{
-  <span class="key">"status"</span>: <span class="str">"ok"</span>,
-  <span class="key">"clamd"</span>: <span class="str">"running"</span>,
-  <span class="key">"definitions"</span>: <span class="str">"2025-10-01"</span>,
-  <span class="key">"version"</span>: <span class="str">"ClamAV 1.3.0"</span>
-}
-        </div>
-      </div>
-
-      <div class="endpoint">
-        <div class="endpoint-header">
           <span class="method delete">DELETE</span>
-          <span class="endpoint-path">/api/file/:id</span>
-          <span class="endpoint-desc">Eliminar archivo del servidor</span>
+          <span class="endpoint-path">/api/cleanup/:fileId</span>
+          <span class="endpoint-desc">Limpia archivos temporales</span>
         </div>
         <div class="code-block">
-{ <span class="key">"deleted"</span>: <span class="str">true</span>, <span class="key">"id"</span>: <span class="str">"scan_abc123"</span> }
+{ <span class="key">"cleaned"</span>: <span class="str">true</span>, <span class="key">"fileId"</span>: <span class="str">"file_abc123"</span> }
         </div>
       </div>
 
