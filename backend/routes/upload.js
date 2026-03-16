@@ -3,6 +3,9 @@ const express = require('express');
 function createUploadRouter({ uploadedFiles, withUpload, genId }) {
   const router = express.Router();
 
+  // POST /api/upload
+  // Recibe archivo multipart, valida tipo/tamano via middleware,
+  // guarda en directorio temporal y retorna fileId unico.
   router.post('/upload', withUpload, (req, res) => {
     if (!req.file) {
       return res.status(400).json({ error: 'No se recibio ningun archivo' });
