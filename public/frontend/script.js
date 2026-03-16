@@ -12,6 +12,16 @@ const ALLOWED_EXTENSIONS = [
     '.zip', '.rar', '.7z', '.exe'
 ];
 
+// ========================
+// Comunicacion asincrona con backend
+// ========================
+const API_BASE = '/api';
+const REQUEST_TIMEOUT_MS = 10000;      // Timeout por request individual
+const SCAN_TIMEOUT_MS = 120000;        // Timeout total del proceso de escaneo
+const POLL_INTERVAL_MS = 1500;         // Frecuencia de polling de estado
+const MAX_RETRIES = 3;                 // Reintentos para fallos temporales
+const RETRY_BASE_DELAY_MS = 500;       // Backoff exponencial base
+
 // Interfaz drag & drop
 uploadZone.addEventListener('dragover', (e) => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
 
@@ -102,28 +112,24 @@ async function startScan() {
     document.getElementById('resultSection').classList.remove('show');
     resetSteps();
 
-    const steps = [
-        { id: 'step1', text: 'Subiendo archivo...', pct: 20 },
-        { id: 'step2', text: 'Verificando SHA-256...', pct: 40 },
-        { id: 'step3', text: 'Iniciando ClamAV...', pct: 60 },
-        { id: 'step4', text: 'Analizando firmas...', pct: 80 },
-        { id: 'step5', text: 'Generando reporte...', pct: 100 }
-    ];
-
-    for (let i = 0; i < steps.length; i++) {
-        setStepActive(steps[i].id);
-        setProgress(steps[i].pct, steps[i].text);
-        await sleep(700 + Math.random() * 400);
-        setStepDone(steps[i].id);
-    }
-
-    await sleep(400);
-
     try {
-        const result = await mockScanAPI(selectedFile);
-        showResult(result); // success o infected
+        // 1) SUBIDA DEL ARCHIVO (POST /api/upload)
+        setStepActive('step1');
+        setProgress(20, 'Subiendo archivo...');
+        const uploadData = await uploadFile(selectedFile);
+        setStepDone('step1');
+
+        // 2) CREACION DEL JOB DE ESCANEO (POST /api/scan/:fileId)
+        setStepActive('step2');
+        setProgress(40, 'Creando job de escaneo...');
+        const scanData = await createScanJob(uploadData.fileId);
+        setStepDone('step2');
+
+        // 3) POLLING ASINCRONO + TIMEOUT GLOBAL + RETRY EN FALLOS TEMPORALES
+        const result = await pollScanResult(scanData.scanId);
+        showResult(result); // clean o infected
     } catch (e) {
-        showResult({ status: 'error', message: e.message }); // error
+        showResult({ status: 'error', message: e.message });
     }
 
     document.getElementById('scanBtn').disabled = false;
@@ -211,6 +217,197 @@ function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
 }
 
+function isTemporaryFailureStatus(status) {
+    return [408, 425, 429, 500, 502, 503, 504].includes(status);
+}
+
+function getRetryDelay(attempt) {
+    const exponential = RETRY_BASE_DELAY_MS * (2 ** attempt);
+    const jitter = Math.floor(Math.random() * 200);
+    return exponential + jitter;
+}
+
+// Request con timeout por AbortController.
+// Retorna status HTTP y body JSON (o texto fallback) para poder manejar 200/422/500.
+async function requestJson(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+
+        let data = null;
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+            data = await response.json();
+        } else {
+            const text = await response.text();
+            data = { message: text || 'Respuesta sin contenido' };
+        }
+
+        return { ok: response.ok, status: response.status, data };
+    } catch (err) {
+        if (err.name === 'AbortError') {
+            throw new Error('Timeout de red: el servidor tardo demasiado en responder');
+        }
+        throw new Error(`Error de red: ${err.message}`);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// Retry logic para fallos temporales (timeouts, errores de red y status transitorios).
+// Se usa en endpoints idempotentes de polling para no duplicar operaciones.
+async function requestWithRetry(url, options = {}, cfg = {}) {
+    const {
+        retries = MAX_RETRIES,
+        timeoutMs = REQUEST_TIMEOUT_MS
+    } = cfg;
+
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            const res = await requestJson(url, options, timeoutMs);
+
+            if (!res.ok && isTemporaryFailureStatus(res.status) && attempt < retries) {
+                await sleep(getRetryDelay(attempt));
+                continue;
+            }
+
+            return res;
+        } catch (err) {
+            lastError = err;
+            if (attempt < retries) {
+                await sleep(getRetryDelay(attempt));
+                continue;
+            }
+            throw lastError;
+        }
+    }
+
+    throw lastError || new Error('Fallo temporal no recuperable');
+}
+
+// POST /api/upload
+async function uploadFile(file) {
+    const form = new FormData();
+    form.append('file', file);
+
+    const res = await requestJson(`${API_BASE}/upload`, {
+        method: 'POST',
+        body: form
+    });
+
+    if (!res.ok) {
+        throw new Error(res.data?.error || res.data?.message || 'No se pudo subir el archivo');
+    }
+
+    return res.data;
+}
+
+// POST /api/scan/:fileId
+async function createScanJob(fileId) {
+    const res = await requestJson(`${API_BASE}/scan/${encodeURIComponent(fileId)}`, {
+        method: 'POST'
+    });
+
+    if (!res.ok) {
+        throw new Error(res.data?.error || res.data?.message || 'No se pudo iniciar el escaneo');
+    }
+
+    return res.data;
+}
+
+// Polling asincrono del estado y resultado final.
+// Cubre:
+// - Comunicacion asincrona (polling)
+// - Timeout total del escaneo
+// - Retry para errores temporales
+async function pollScanResult(scanId) {
+    const timeoutAt = Date.now() + SCAN_TIMEOUT_MS;
+    let step3Done = false;
+    let step4Active = false;
+
+    setStepActive('step3');
+    setProgress(60, 'Esperando inicio del escaneo...');
+
+    while (Date.now() < timeoutAt) {
+        const statusRes = await requestWithRetry(`${API_BASE}/status/${encodeURIComponent(scanId)}`, {
+            method: 'GET'
+        });
+
+        if (!statusRes.ok) {
+            throw new Error(statusRes.data?.error || statusRes.data?.message || 'No se pudo consultar el estado');
+        }
+
+        const status = statusRes.data.status;
+
+        if (status === 'pending') {
+            setProgress(60, 'Escaneo en cola...');
+            await sleep(POLL_INTERVAL_MS);
+            continue;
+        }
+
+        if (status === 'scanning') {
+            if (!step3Done) {
+                setStepDone('step3');
+                step3Done = true;
+            }
+
+            if (!step4Active) {
+                setStepActive('step4');
+                step4Active = true;
+            }
+
+            setProgress(80, 'ClamAV analizando firmas...');
+            await sleep(POLL_INTERVAL_MS);
+            continue;
+        }
+
+        if (status === 'error') {
+            const resultRes = await requestWithRetry(`${API_BASE}/result/${encodeURIComponent(scanId)}`, {
+                method: 'GET'
+            });
+            throw new Error(resultRes.data?.error || resultRes.data?.message || 'El escaneo fallo');
+        }
+
+        if (status === 'completed') {
+            if (!step3Done) setStepDone('step3');
+            if (step4Active) setStepDone('step4');
+
+            setStepActive('step5');
+            setProgress(100, 'Generando reporte final...');
+
+            const resultRes = await requestWithRetry(`${API_BASE}/result/${encodeURIComponent(scanId)}`, {
+                method: 'GET'
+            });
+
+            // 200 => archivo limpio
+            if (resultRes.status === 200) {
+                setStepDone('step5');
+                return resultRes.data;
+            }
+
+            // 422 => archivo infectado (resultado valido con amenazas)
+            if (resultRes.status === 422) {
+                setStepDone('step5');
+                return resultRes.data;
+            }
+
+            // 500 u otro estado inesperado
+            throw new Error(resultRes.data?.error || resultRes.data?.message || 'No se pudo obtener el resultado final');
+        }
+
+        await sleep(POLL_INTERVAL_MS);
+    }
+
+    throw new Error(`Timeout: el escaneo excedio ${Math.floor(SCAN_TIMEOUT_MS / 1000)} segundos`);
+}
+
 function getFileEmoji(name) {
     const ext = name.split('.').pop().toLowerCase();
     const map = {
@@ -234,35 +431,6 @@ function formatSize(bytes) {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / 1048576).toFixed(2)} MB`;
-}
-
-// MOCK - reemplazar por fetch('/api/scan', { method: 'POST', body: formData })
-async function mockScanAPI(file) {
-    await sleep(300);
-
-    const isInfected = file.name.toLowerCase().includes('test') || file.name.toLowerCase().includes('virus');
-    const sha256 = Array.from({ length: 16 }, () => Math.floor(Math.random() * 256).toString(16).padStart(2, '0')).join('');
-
-    if (isInfected) {
-        return {
-            status: 'infected',
-            filename: file.name,
-            size: file.size,
-            sha256,
-            scannedAt: new Date().toISOString(),
-            threats: ['Win.Trojan.Agent-' + Math.floor(Math.random() * 9999), 'Heuristics.Suspicious']
-        };
-    }
-
-    return {
-        status: 'clean',
-        filename: file.name,
-        size: file.size,
-        sha256,
-        scannedAt: new Date().toISOString(),
-        threats: [],
-        scanDuration: (Math.random() * 2 + 0.5).toFixed(2)
-    };
 }
 
 // Toggle visual de la seccion de documentacion API.
