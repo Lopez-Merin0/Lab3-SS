@@ -129,12 +129,6 @@ async function startScan() {
     document.getElementById('scanBtn').disabled = false;
 }
 
-// Responsive design
-/*
-   Esta funcionalidad vive en styles.css:
-   - bloque @media (max-width: 600px)
-*/
-
 //Feedback visual del resultado del escaneo
 function showResult(data) {
     document.getElementById('progressSection').classList.remove('show');
