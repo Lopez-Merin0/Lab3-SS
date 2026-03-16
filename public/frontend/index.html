@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShieldScan — Antivirus en la Nube</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="container">
+
+  <!-- HEADER -->
+  <header>
+    <div class="logo-icon">🛡</div>
+    <h1>Shield<span>Scan</span></h1>
+    <div class="badge">v1.0 · ClamAV</div>
+  </header>
+
+  <!-- HERO -->
+  <section class="hero">
+    <h2>Escaneo de malware<br><span class="highlight">en tiempo real</span></h2>
+    <p>Sube cualquier archivo y ClamAV lo analizará en segundos. Detección de virus, troyanos y código malicioso.</p>
+  </section>
+
+  <!-- UPLOAD -->
+  <section class="upload-section">
+    <div class="upload-zone" id="uploadZone">
+      <span class="upload-icon">📁</span>
+      <h3>Arrastra tu archivo aquí</h3>
+      <p>o <strong onclick="document.getElementById('fileInput').click()">haz clic para seleccionar</strong></p>
+      <div class="file-types">
+        <span class="file-type-tag">.exe</span>
+        <span class="file-type-tag">.pdf</span>
+        <span class="file-type-tag">.zip</span>
+        <span class="file-type-tag">.doc</span>
+        <span class="file-type-tag">.js</span>
+        <span class="file-type-tag">y más</span>
+      </div>
+      <input type="file" id="fileInput" accept="*/*">
+    </div>
+
+    <div class="selected-file" id="selectedFile">
+      <span class="file-icon" id="fileEmoji">📄</span>
+      <div class="file-info">
+        <div class="file-name" id="fileName">—</div>
+        <div class="file-size" id="fileSize">—</div>
+      </div>
+      <button class="remove-btn" onclick="clearFile()">✕ Quitar</button>
+    </div>
+
+    <button class="scan-btn" id="scanBtn" disabled onclick="startScan()">
+      🔍 Escanear con ClamAV
+    </button>
+  </section>
+
+  <!-- PROGRESS -->
+  <section class="progress-section" id="progressSection">
+    <div class="progress-label">
+      <span id="progressText">Iniciando escaneo...</span>
+      <span id="progressPct">0%</span>
+    </div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div class="scan-steps">
+      <div class="step" id="step1"><div class="step-dot"></div> Subiendo archivo al servidor</div>
+      <div class="step" id="step2"><div class="step-dot"></div> Verificando integridad (SHA-256)</div>
+      <div class="step" id="step3"><div class="step-dot"></div> Ejecutando ClamAV daemon (clamd)</div>
+      <div class="step" id="step4"><div class="step-dot"></div> Analizando firmas de malware</div>
+      <div class="step" id="step5"><div class="step-dot"></div> Generando reporte de resultados</div>
+    </div>
+  </section>
+
+  <!-- RESULT -->
+  <section class="result-section" id="resultSection">
+    <!-- Populated dynamically -->
+  </section>
+
+  <!-- API DOCS -->
+  <section class="api-section">
+    <div class="api-header" onclick="toggleApi()">
+      <span>⚙</span>
+      <h3>Documentación de la API REST</h3>
+      <span id="apiToggleText">Expandir ↓</span>
+    </div>
+    <div class="api-body" id="apiBody">
+
+      <div class="endpoint">
+        <div class="endpoint-header">
+          <span class="method post">POST</span>
+          <span class="endpoint-path">/api/scan</span>
+          <span class="endpoint-desc">Escanear un archivo</span>
+        </div>
+        <div class="code-block">
+<span class="comment">// Request (multipart/form-data)</span>
+<span class="key">Content-Type:</span> <span class="str">multipart/form-data</span>
+<span class="key">Body:</span>  <span class="str">file</span> = &lt;archivo_binario&gt;
+
+<span class="comment">// Response 200 - Limpio</span>
+{
+  <span class="key">"status"</span>: <span class="str">"clean"</span>,
+  <span class="key">"filename"</span>: <span class="str">"documento.pdf"</span>,
+  <span class="key">"size"</span>: <span class="num">204800</span>,
+  <span class="key">"sha256"</span>: <span class="str">"a3f5c8..."</span>,
+  <span class="key">"scannedAt"</span>: <span class="str">"2025-10-01T14:32:00Z"</span>,
+  <span class="key">"threats"</span>: []
+}
+
+<span class="comment">// Response 200 - Infectado</span>
+{
+  <span class="key">"status"</span>: <span class="str">"infected"</span>,
+  <span class="key">"threats"</span>: [<span class="str">"Win.Trojan.Agent-1234"</span>],
+  <span class="key">"action"</span>: <span class="str">"quarantined"</span>
+}
+        </div>
+      </div>
+
+      <div class="endpoint">
+        <div class="endpoint-header">
+          <span class="method get">GET</span>
+          <span class="endpoint-path">/api/scan/:id</span>
+          <span class="endpoint-desc">Obtener resultado de un escaneo</span>
+        </div>
+        <div class="code-block">
+<span class="comment">// Response 200</span>
+{
+  <span class="key">"id"</span>: <span class="str">"scan_abc123"</span>,
+  <span class="key">"status"</span>: <span class="str">"clean"</span> | <span class="str">"infected"</span> | <span class="str">"pending"</span>,
+  <span class="key">"result"</span>: { ... }
+}
+        </div>
+      </div>
+
+      <div class="endpoint">
+        <div class="endpoint-header">
+          <span class="method get">GET</span>
+          <span class="endpoint-path">/api/health</span>
+          <span class="endpoint-desc">Estado del servicio ClamAV</span>
+        </div>
+        <div class="code-block">
+{
+  <span class="key">"status"</span>: <span class="str">"ok"</span>,
+  <span class="key">"clamd"</span>: <span class="str">"running"</span>,
+  <span class="key">"definitions"</span>: <span class="str">"2025-10-01"</span>,
+  <span class="key">"version"</span>: <span class="str">"ClamAV 1.3.0"</span>
+}
+        </div>
+      </div>
+
+      <div class="endpoint">
+        <div class="endpoint-header">
+          <span class="method delete">DELETE</span>
+          <span class="endpoint-path">/api/file/:id</span>
+          <span class="endpoint-desc">Eliminar archivo del servidor</span>
+        </div>
+        <div class="code-block">
+{ <span class="key">"deleted"</span>: <span class="str">true</span>, <span class="key">"id"</span>: <span class="str">"scan_abc123"</span> }
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    <span>ShieldScan © 2026 — Laboratorio 3</span>
+    <div class="footer-tech">
+      <span class="tech-tag">Node.js</span>
+      <span class="tech-tag">ClamAV</span>
+      <span class="tech-tag">Express</span>
+      <span class="tech-tag">REST API</span>
+    </div>
+  </footer>
+
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
