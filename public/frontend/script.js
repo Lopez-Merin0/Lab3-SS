@@ -4,6 +4,7 @@
 const uploadZone = document.getElementById('uploadZone');
 const fileInput = document.getElementById('fileInput');
 let selectedFile = null;
+let latestScanResult = null;
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_EXTENSIONS = [
@@ -70,6 +71,7 @@ function handleFileSelect(file) {
 
 function clearFile() {
     selectedFile = null;
+    latestScanResult = null;
     fileInput.value = '';
     document.getElementById('selectedFile').classList.remove('show');
     document.getElementById('scanBtn').disabled = true;
@@ -135,10 +137,12 @@ async function startScan() {
     document.getElementById('scanBtn').disabled = false;
 }
 
-//Feedback visual del resultado del escaneo
+// ESTADOS VISUALES CLAROS + MENSAJES INFORMATIVOS
+// Esta seccion renderiza tarjetas diferentes para clean / infected / error.
 function showResult(data) {
     document.getElementById('progressSection').classList.remove('show');
     const sec = document.getElementById('resultSection');
+    latestScanResult = data;
 
     let html = '';
 
@@ -158,9 +162,11 @@ function showResult(data) {
           <div class="detail-item"><div class="detail-label">SHA-256</div><div class="detail-value" style="font-size:0.75rem">${data.sha256}...</div></div>
           <div class="detail-item"><div class="detail-label">Duración</div><div class="detail-value">${data.scanDuration}s</div></div>
         </div>
-        <div class="action-buttons">
+                <div class="action-buttons">
           <button class="scan-btn" style="width:auto;padding:12px 24px" onclick="clearFile()">📁 Escanear otro</button>
-          <button class="btn-secondary">📋 Copiar reporte</button>
+                                        <button class="btn-secondary" onclick="copyReportToClipboard()">📋 Copiar reporte</button>
+                                        <button class="btn-secondary" onclick="downloadReportJson()">⬇ Descargar reporte JSON</button>
+                                        <button class="btn-secondary" onclick="downloadCleanFile()">⬇ Descargar archivo limpio</button>
         </div>
       </div>`;
     } else if (data.status === 'infected') {
@@ -184,9 +190,17 @@ function showResult(data) {
           <h4>⚠ Amenazas encontradas</h4>
           ${threatItems}
         </div>
+                <div class="threat-list">
+                    <h4>🧭 Instrucciones recomendadas</h4>
+                    <div class="threat-item">No abras ni ejecutes este archivo fuera de cuarentena.</div>
+                    <div class="threat-item">Reporta el incidente al administrador de seguridad.</div>
+                    <div class="threat-item">Si esperabas este archivo, solicita una version limpia al remitente.</div>
+                    <div class="threat-item">Elimina los temporales cuando termines para reducir riesgo.</div>
+                </div>
         <div class="action-buttons">
-          <button class="btn-danger">🗑 Eliminar archivo</button>
-          <button class="btn-secondary">📋 Copiar reporte</button>
+                    <button class="btn-danger" onclick="cleanupInfectedFile()">🗑 Eliminar archivo</button>
+                    <button class="btn-secondary" onclick="copyReportToClipboard()">📋 Copiar reporte</button>
+                    <button class="btn-secondary" onclick="downloadReportJson()">⬇ Descargar reporte JSON</button>
           <button class="btn-secondary" onclick="clearFile()">↩ Volver</button>
         </div>
       </div>`;
@@ -215,6 +229,115 @@ function showResult(data) {
 ======================== */
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));
+}
+
+// Convierte un objeto JS a texto JSON legible para copiar/descargar reportes.
+function buildReportJson(data) {
+    return JSON.stringify(data, null, 2);
+}
+
+// Permite copiar el reporte final al portapapeles para evidencia/documentacion.
+async function copyReportToClipboard() {
+    if (!latestScanResult) {
+        alert('No hay reporte disponible para copiar.');
+        return;
+    }
+
+    const reportText = buildReportJson(latestScanResult);
+
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(reportText);
+        } else {
+            // Fallback para contextos no seguros: textarea temporal + execCommand.
+            const area = document.createElement('textarea');
+            area.value = reportText;
+            area.style.position = 'fixed';
+            area.style.left = '-9999px';
+            document.body.appendChild(area);
+            area.focus();
+            area.select();
+            document.execCommand('copy');
+            document.body.removeChild(area);
+        }
+
+        alert('Reporte copiado al portapapeles.');
+    } catch (err) {
+        alert(`No se pudo copiar el reporte: ${err.message}`);
+    }
+}
+
+// Descarga el reporte como archivo .json para evidencia del laboratorio.
+function downloadReportJson() {
+    if (!latestScanResult) {
+        alert('No hay reporte disponible para descargar.');
+        return;
+    }
+
+    const reportText = buildReportJson(latestScanResult);
+    const blob = new Blob([reportText], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const filenameBase = (latestScanResult.filename || 'reporte').replace(/\s+/g, '_');
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `shieldscan_report_${filenameBase}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+//Opcion de descarga para archivos limpios.
+// Se reutiliza el archivo local seleccionado por el usuario en el navegador.
+function downloadCleanFile() {
+    if (!latestScanResult || latestScanResult.status !== 'clean') {
+        alert('La descarga de archivo esta disponible solo para resultados limpios.');
+        return;
+    }
+
+    if (!selectedFile) {
+        alert('No se encontro el archivo local para descargar.');
+        return;
+    }
+
+    const url = URL.createObjectURL(selectedFile);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = selectedFile.name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+// INSTRUCCIONES PARA ARCHIVOS INFECTADOS
+// Funciones:
+// - Bloque de "Instrucciones recomendadas" en showResult(status='infected')
+// - cleanupInfectedFile(): elimina temporales infectados en backend
+// ============================================================================
+// Limpia el archivo infectado en backend (DELETE /api/cleanup/:fileId)
+// y reinicia la UI para evitar que el usuario vuelva a interactuar con ese archivo.
+async function cleanupInfectedFile() {
+    if (!latestScanResult?.fileId) {
+        alert('No se encontro fileId para limpiar el archivo infectado.');
+        return;
+    }
+
+    try {
+        const res = await requestJson(`${API_BASE}/cleanup/${encodeURIComponent(latestScanResult.fileId)}`, {
+            method: 'DELETE'
+        });
+
+        if (!res.ok) {
+            throw new Error(res.data?.error || res.data?.message || 'No se pudo limpiar el archivo infectado');
+        }
+
+        alert('Archivo infectado eliminado de temporales correctamente.');
+        clearFile();
+    } catch (err) {
+        alert(`No se pudo eliminar el archivo: ${err.message}`);
+    }
 }
 
 function isTemporaryFailureStatus(status) {
