@@ -69,7 +69,12 @@ CORS_ORIGIN=*
 CLAMD_HOST=127.0.0.1
 CLAMD_PORT=3310
 API_KEY=
+ALLOW_SCAN_WITHOUT_CLAMAV=true
 ```
+
+`ALLOW_SCAN_WITHOUT_CLAMAV`:
+- `true` => Si ClamAV no esta disponible, devuelve resultado `clean` en modo fallback (util para desarrollo local).
+- `false` => Si ClamAV no esta disponible, retorna error tecnico (`ClamAV no inicializado`).
 
 ## Ejecucion
 

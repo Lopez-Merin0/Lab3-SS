@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "start": "node backend/server.js"
+    "start": "node scripts/start-project.js",
+    "start:backend": "node backend/server.js"
   },
   "dependencies": {
     "clamscan": "^2.4.0",
