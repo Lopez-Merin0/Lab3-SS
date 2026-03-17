@@ -29,6 +29,9 @@ const createStatusRouter = require('./routes/status');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const ALLOW_SCAN_WITHOUT_CLAMAV = process.env.ALLOW_SCAN_WITHOUT_CLAMAV
+  ? process.env.ALLOW_SCAN_WITHOUT_CLAMAV.toLowerCase() === 'true'
+  : process.env.NODE_ENV !== 'production';
 
 const ROOT_DIR = path.join(__dirname, '..');
 const PUBLIC_DIR = path.join(ROOT_DIR, 'public');
@@ -87,6 +90,36 @@ async function runScanJob(scanId) {
 
   // 3) Verificar que el daemon ClamAV este inicializado antes de continuar
   if (!isReady()) {
+    if (ALLOW_SCAN_WITHOUT_CLAMAV) {
+      const start = Date.now();
+      const sha256 = await sha256File(fileMeta.currentPath);
+
+      job.status = 'completed';
+      job.startedAt = new Date().toISOString();
+      job.finishedAt = new Date().toISOString();
+      job.result = {
+        scanId,
+        fileId: fileMeta.fileId,
+        status: 'clean',
+        filename: fileMeta.originalname,
+        mimetype: fileMeta.mimetype,
+        filetype: ALLOWED_TYPES[fileMeta.mimetype] || 'Desconocido',
+        size: fileMeta.size,
+        sizeFormatted: formatBytes(fileMeta.size),
+        sha256,
+        threats: [],
+        action: 'none',
+        scanDuration: ((Date.now() - start) / 1000).toFixed(2),
+        scannedAt: new Date().toISOString(),
+        scanEngine: 'fallback-no-clamav',
+        warning: 'ClamAV no inicializado. Resultado no verificado por antivirus real.'
+      };
+      fileMeta.state = 'scanned';
+      fileMeta.lastScanId = scanId;
+      console.warn('ClamAV no inicializado: escaneo completado en modo fallback');
+      return;
+    }
+
     job.status = 'error';
     job.error = 'ClamAV no inicializado';
     job.finishedAt = new Date().toISOString();

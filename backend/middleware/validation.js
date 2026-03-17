@@ -4,25 +4,23 @@ const path = require('path');
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
 const ALLOWED_EXTENSIONS = [
-  '.pdf', '.doc', '.docx', '.xls', '.xlsx',
-  '.txt', '.jpg', '.jpeg', '.png', '.gif',
-  '.zip', '.rar', '.7z', '.exe'
+  '.pdf', '.doc', '.txt', '.zip'
 ];
 
 const ALLOWED_TYPES = {
   'application/pdf': 'PDF',
   'application/msword': 'Word',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word',
-  'application/vnd.ms-excel': 'Excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel',
   'text/plain': 'Texto',
-  'image/jpeg': 'JPEG',
-  'image/png': 'PNG',
-  'image/gif': 'GIF',
   'application/zip': 'ZIP',
-  'application/x-rar-compressed': 'RAR',
-  'application/x-7z-compressed': '7-Zip',
-  'application/x-msdownload': 'EXE'
+  'application/x-zip-compressed': 'ZIP',
+  'multipart/x-zip': 'ZIP'
+};
+
+const MIME_BY_EXTENSION = {
+  '.pdf': ['application/pdf'],
+  '.doc': ['application/msword'],
+  '.txt': ['text/plain'],
+  '.zip': ['application/zip', 'application/x-zip-compressed', 'multipart/x-zip']
 };
 
 function createUploadMiddleware(uploadDir) {
@@ -39,13 +37,19 @@ function createUploadMiddleware(uploadDir) {
     limits: { fileSize: MAX_FILE_SIZE },
     fileFilter: (req, file, cb) => {
       const ext = path.extname(file.originalname.toLowerCase());
+      const mime = (file.mimetype || '').toLowerCase();
 
       if (!ALLOWED_EXTENSIONS.includes(ext)) {
         return cb(new Error(`Extension no permitida: ${ext || 'sin extension'}`));
       }
 
-      if (!ALLOWED_TYPES[file.mimetype]) {
-        return cb(new Error(`MIME type no permitido: ${file.mimetype}`));
+      // Algunos clientes mandan application/octet-stream para archivos validos.
+      // En ese caso confiamos en la extension ya validada.
+      if (mime && mime !== 'application/octet-stream') {
+        const allowedMimeForExtension = MIME_BY_EXTENSION[ext] || [];
+        if (!allowedMimeForExtension.includes(mime)) {
+          return cb(new Error(`MIME type no permitido para ${ext}: ${file.mimetype}`));
+        }
       }
 
       cb(null, true);
@@ -57,6 +61,9 @@ function createUploadMiddleware(uploadDir) {
       if (!err) return next();
       if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
         return next(Object.assign(new Error('Archivo demasiado grande. Maximo permitido: 10MB'), { statusCode: 413 }));
+      }
+      if (err instanceof multer.MulterError && err.code === 'LIMIT_UNEXPECTED_FILE') {
+        return next(Object.assign(new Error('Campo de archivo invalido. Usa multipart/form-data con el campo "file"'), { statusCode: 400 }));
       }
       return next(Object.assign(err, { statusCode: 400 }));
     });

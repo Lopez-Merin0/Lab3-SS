@@ -8,15 +8,34 @@ let latestScanResult = null;
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_EXTENSIONS = [
-    '.pdf', '.doc', '.docx', '.xls', '.xlsx',
-    '.txt', '.jpg', '.jpeg', '.png', '.gif',
-    '.zip', '.rar', '.7z', '.exe'
+    '.pdf', '.doc', '.txt', '.zip'
 ];
 
 // ========================
 // Comunicacion asincrona con backend
 // ========================
-const API_BASE = '/api';
+function resolveApiBase() {
+    const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const port = window.location.port;
+
+    // Si se abre el HTML directo (file://) o desde un dev server distinto,
+    // apuntamos al backend local por defecto para evitar "Failed to fetch".
+    if (protocol === 'file:') {
+        return 'http://localhost:3000/api';
+    }
+
+    const isBackendPort = port === '3000';
+    const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
+
+    if (isLocalHost && !isBackendPort) {
+        return 'http://localhost:3000/api';
+    }
+
+    return '/api';
+}
+
+const API_BASE = resolveApiBase();
 const REQUEST_TIMEOUT_MS = 10000;      // Timeout por request individual
 const SCAN_TIMEOUT_MS = 120000;        // Timeout total del proceso de escaneo
 const POLL_INTERVAL_MS = 1500;         // Frecuencia de polling de estado
@@ -376,6 +395,11 @@ async function requestJson(url, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
         if (err.name === 'AbortError') {
             throw new Error('Timeout de red: el servidor tardo demasiado en responder');
         }
+
+        if (err instanceof TypeError && /Failed to fetch/i.test(err.message || '')) {
+            throw new Error('Error de red: no se pudo conectar con el backend. Verifica que este corriendo en http://localhost:3000');
+        }
+
         throw new Error(`Error de red: ${err.message}`);
     } finally {
         clearTimeout(timer);
